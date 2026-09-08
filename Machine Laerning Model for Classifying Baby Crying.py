@@ -1,0 +1,264 @@
+#Model's Training Libraries
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score,f1_score,confusion_matrix, classification_report,multilabel_confusion_matrix,ConfusionMatrixDisplay
+import pickle
+from imblearn.over_sampling import SMOTE
+from sklearn.datasets import load_diabetes
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from sklearn.metrics import mean_squared_error, r2_score
+#Audio Procesing Libraries (Sarah)
+import glob
+import os
+import shutil
+from sklearn.model_selection import train_test_split
+import soundfile as sf
+import librosa
+import matplotlib.pyplot as plt
+import noisereduce as nr
+import sounddevice as sd
+import warnings
+warnings.filterwarnings("ignore")
+#*********************************************************************************************************************************#
+#Stage 1 : Audio Preprocessing (By : Sarah Mustafa 7017E)
+#Functions of Preprocessing stage
+def add_white_noise(signal,noise_factor):
+    noise= np.random.normal(0,signal.std(),signal.size)
+    augmented_signal=signal + noise * noise_factor
+    return augmented_signal
+def time_stretch(signal,stretch_rate):
+    return librosa.effects.time_stretch(y= signal,rate= stretch_rate)
+def pitch_scale(signal,sr,n_steps): 
+    return librosa.effects.pitch_shift(y=signal,sr=sr,n_steps=n_steps,bins_per_octave=12)
+def extract_cry_features(signal, sr=16000):
+    cleaned_signal = nr.reduce_noise(y=signal, sr=sr)
+    intervals=librosa.effects.split(cleaned_signal,top_db=20)
+    if len(intervals)>0:
+        VAD_signal=np.concatenate([cleaned_signal[start:end]for start,end in intervals])
+    else:
+        VAD_signal=cleaned_signal
+    if len(VAD_signal) == 0:
+            return None
+    MFCCs=librosa.feature.mfcc(y=VAD_signal,sr=sr,n_mfcc=13)
+    MFCC_mean=np.mean(MFCCs,axis=1)
+    MFCC_std=np.std(MFCCs,axis=1)
+    f0=librosa.yin(VAD_signal,fmin=librosa.note_to_hz('C3'),fmax=librosa.note_to_hz('C7'),frame_length=2048)
+    f0_clean=f0[~np.isnan(f0)]if f0 is not None else[]
+    f0_mean=np.mean(f0_clean)if len(f0_clean)>0 else 0.0
+    f0_std=np.std(f0_clean) if len (f0_clean)>0 else 0.0
+    rms = librosa.feature.rms(y=VAD_signal)
+    intensity_mean = np.mean(rms)
+    intensity_std = np.std(rms)
+    duration = librosa.get_duration(y=VAD_signal, sr=sr)
+    feature_vector=np.hstack([
+        MFCC_mean,
+        MFCC_std,
+        f0_mean,
+        f0_std,
+        intensity_mean,
+        intensity_std,
+        duration])
+    return (feature_vector)
+def plot_two_signals(signal,augmented_signal,sr,figure_name):
+    fig,ax =plt.subplots(nrows=2,num= figure_name)
+    librosa.display.waveshow(signal,sr=sr,ax=ax[0])
+    ax[0].set(title="OG Signal")
+    librosa.display.waveshow(augmented_signal,sr=sr,ax=ax[1])
+    ax[1].set(title="AG Signal")
+    plt.tight_layout()
+    plt.show(block= False)
+#----------------------------------------------------------------------------------------------------------------
+#Loading and Splitting Raw Data set
+RawData= r"D:\dhuha\Mind\donateacry_corpus" #add the data set file's path here
+classes_labels=["hungry","discomfort","tired"]
+label_map = {"hungry": 0, "discomfort": 1, "tired": 2}
+X_train, Y_train = [], []
+X_test, Y_test = [], []
+noise_factors = [0.01, 0.05, 0.10, 0.15, 0.20]
+stretch_rates = [0.75, 0.88, 1.0, 1.15, 1.35]
+pitch_steps = [-4, -2, -1, 2, 4]
+for cls in classes_labels:
+    label = label_map[cls]
+    files=glob.glob(f"{RawData}/{cls}/*.wav")
+    train_files,test_files = train_test_split(files,test_size=0.20,random_state=40)
+    os.makedirs(f"dataset_split/test/{cls}",exist_ok=True)
+    os.makedirs(f"dataset_split/train/{cls}",exist_ok=True)
+#Feature Extraction of audio data set
+    for f in test_files:
+        path_test=f"dataset_split/test/{cls}/{os.path.basename(f)}"
+        shutil.copy(f, path_test)
+        sig, sr_in = librosa.load(path_test, sr=16000, mono=True)
+        feat = extract_cry_features(sig, sr=sr_in)
+        if feat is not None:
+            X_test.append(feat)
+            Y_test.append(label)
+    for f in train_files:
+        path_train=f"dataset_split/train/{cls}/{os.path.basename(f)}"
+        shutil.copy(f,path_train)
+        sig, sr_in = librosa.load(path_train, sr=16000, mono=True)
+        feat = extract_cry_features(sig, sr=sr_in)
+        if feat is not None:
+            X_train.append(feat)
+            Y_train.append(label)                  
+#Data Augmentation for minority classes (on training data set only)
+    if cls=="hungry":
+        continue
+    else:
+        os.makedirs(f"dataset_split/train_augmented/{cls}",exist_ok=True)
+        for f in train_files:            
+            signal , sr= librosa.load(f,sr=None)
+            for idx, factor in enumerate(noise_factors):
+                augmented_signal_N= add_white_noise(signal,factor)
+                new_name_N= os.path.splitext(os.path.basename(f))[0]
+                path_N=f"dataset_split/train_augmented/{cls}/{new_name_N}_noise_{idx}.wav"
+                sf.write( path_N ,augmented_signal_N,sr)
+                feat_N = extract_cry_features(augmented_signal_N, sr)
+                if feat_N is not None:
+                    X_train.append(feat_N)
+                    Y_train.append(label)
+            for idx, rate in enumerate(stretch_rates):
+                augmented_signal_T= time_stretch(signal,rate)
+                new_name_T= os.path.splitext(os.path.basename(f))[0]
+                path_T=f"dataset_split/train_augmented/{cls}/{new_name_T}_stretch_{idx}.wav"
+                sf.write(path_T,augmented_signal_T,sr)
+                feat_T= extract_cry_features(augmented_signal_T, sr)
+                if feat_T is not None:
+                    X_train.append(feat_T)
+                    Y_train.append(label)
+            for idx, step in enumerate(pitch_steps):
+                augmented_signal_P= pitch_scale(signal,sr,step)
+                new_name_P= os.path.splitext(os.path.basename(f))[0]
+                path_P=f"dataset_split/train_augmented/{cls}/{new_name_P}_pitch_{idx}.wav"
+                sf.write(path_P,augmented_signal_P,sr)
+                feat_P = extract_cry_features(augmented_signal_P, sr)
+                if feat_P is not None:
+                    X_train.append(feat_P)
+                    Y_train.append(label) 
+#saving processed data into extracted features folder                
+os.makedirs("extracted_features", exist_ok=True)
+np.save("extracted_features/X_train.npy", np.array(X_train))
+np.save("extracted_features/Y_train.npy", np.array(Y_train))
+np.save("extracted_features/X_test.npy", np.array(X_test))
+np.save("extracted_features/Y_test.npy", np.array(Y_test))
+#printing training and testing counts after augmentation
+for cls in classes_labels:
+    train_count = len(glob.glob(f"dataset_split/train/{cls}/*.wav"))
+    test_count = len(glob.glob(f"dataset_split/test/{cls}/*.wav"))
+    print(f"{cls} Train: {train_count}  Test: {test_count}")
+#Playing audio sample to show difference between original soung and after adding noise (augmentation)   
+print("Playing Original Audio")
+sd.play(signal, sr)
+sd.wait()
+print("Playing Augmented (Noise) Audio")
+sd.play(augmented_signal_N, sr)
+sd.wait()
+#plotting original signal sample Vs. augmented 
+plot_two_signals(signal,augmented_signal_N,sr,"Noise Added")
+plot_two_signals(signal,augmented_signal_T,sr,"Time Stretched")
+plot_two_signals(signal,augmented_signal_P,sr,"Pitch Scaling")
+plt.show()                                       
+#***************************************************************************************************************#
+#Stage 2: Training and Testing the Model (By : Dhuha Ali 7020E)
+#------Importing processed data code files-------------
+X_train = np.load(r"D:\dhuha\Mind\extracted_features\X_train.npy")
+Y_train = np.load(r"D:\dhuha\Mind\extracted_features\Y_train.npy")
+X_test = np.load(r"D:\dhuha\Mind\extracted_features\X_test.npy")
+Y_test = np.load(r"D:\dhuha\Mind\extracted_features\Y_test.npy")
+label_map = {
+    0: "Hungry",
+    1: "Discomfort",
+    2: "Tired"
+}
+#printing class counts for each of trainging and testing data sets
+unique_train, counts_train = np.unique(Y_train, return_counts=True)
+print("Y_train class counts:")
+for cls, count in zip(unique_train, counts_train):
+    print(f"Class {cls} ({label_map.get(cls, 'Unknown')}): {count} samples")
+unique_test, counts_test = np.unique(Y_test, return_counts=True)
+print("\nY_test class counts:")
+for cls, count in zip(unique_test, counts_test):
+    print(f"Class {cls} ({label_map.get(cls, 'Unknown')}): {count} samples")
+#----------------------------------------------------------------------------------------------------------------------------------------------------------    
+#Training Block
+#---------------
+#oversampling training data
+smote = SMOTE(random_state=42)
+X_train_resampled, Y_train_resampled = smote.fit_resample(X_train, Y_train)
+#Fitting Data
+rf=RandomForestClassifier(class_weight='balanced',random_state=42,max_depth=3,n_estimators=100,min_samples_leaf=30,max_features='log2')
+"""max_depth reduced from 10 to 7, to reduce biasing and that succissfuly was acieved. Setting its values to 7 gives the least biasing"""
+"""but the accuracy gap increased, still the model suffers from overfitting and requires to enhance the model accuracy(reducing the accuracy gap)"""
+""""""
+rf.fit(X_train_resampled,Y_train_resampled)
+#Saving trained File (as pickle string)
+saved_model=pickle.dumps(rf)
+#Testing Block
+#-------------
+#load pickeled model
+rf_from_pickle=pickle.loads(saved_model)
+Y_predict = rf_from_pickle.predict(X_test)
+classes_encoded=[0,1,2]
+classes_labels = ["hungry", "discomfort", "tired"]
+#Confusion Matrix
+cm=confusion_matrix(Y_test,Y_predict,labels=classes_encoded)
+#plot confusion matrix
+disp=ConfusionMatrixDisplay(confusion_matrix=cm,display_labels=classes_labels)
+disp.plot(cmap=plt.cm.Reds)
+plt.title('Confusion Matrix',fontsize=15)
+plt.xlabel('Prediction',fontsize=13)
+plt.gca().xaxis.set_label_position('top')
+plt.gca().xaxis.tick_top()
+plt.gca().figure.subplots_adjust(bottom=0.2)
+
+plt.show()
+#Multilabel confusion matrix
+mcm = multilabel_confusion_matrix(Y_test, Y_predict)
+print("Multilabel confusion matrix is like :" "\n", np.array([['TN','FP'],
+                                                        ['FN','TP']]) )
+for class_label, multi_label_matrix in zip(classes_labels,mcm):
+    print(f"{class_label} Confusion Matrix :\n {multi_label_matrix} ")
+#Diagnosing Overfitting/ Underfitting/Biasing
+training_accuracy_score=accuracy_score(Y_train,rf_from_pickle.predict(X_train))
+testing_accuracy_score=accuracy_score(Y_test,Y_predict)
+accuracy_gap=abs(training_accuracy_score-testing_accuracy_score)
+macro_f1=f1_score(Y_test, Y_predict, average='macro')
+weighted_f1=f1_score(Y_test, Y_predict, average='weighted')
+
+print(f"Training Accuracy Score : {round(training_accuracy_score*100,1)}%")
+print(f"Testing Accuracy Score : {round(testing_accuracy_score*100,1)}%")
+print(f"Accuracy Gap : {round(accuracy_gap,2)}")
+print(f"Macro Score for testing (Indicates overall performance across all classes equally)  :{round(macro_f1,2)}")
+print(f"Weighted Score for testing (Indicates overall performance weighted by class size) : {round(weighted_f1,2)}\n")
+
+if (training_accuracy_score < 0.70 and testing_accuracy_score < 0.70):
+    print("Underfitting Model (Low performance on both train and test) : both are < 0.7 accuracy")
+elif (accuracy_gap > 0.10):
+    print(f"Overfitting Model (High train accuracy with a large gap to test accuracy) : Accuracy Gap> 0.1 ")
+if (macro_f1 < 0.5):
+    print(f"Poor Performance (Biased due to Class Imbalance) : Macro_F1 score < 0.5")    
+if(training_accuracy_score >= 0.70 and testing_accuracy_score >= 0.70 and accuracy_gap <= 0.10 and macro_f1 >= 0.5):
+    print("Good Fit (Balanced performance and small gap)")    
+    
+#***************************************************************************************************************#
+#Stage 3: Apllying the classification model to a live voice (Sarah , Dhuha : 7017E,7020E)
+# Getting Live Records <<<@ Rana GUI
+def get_live_features(audio, sr=16000):
+    live_signal = audio.flatten()
+    if np.max(np.abs(live_signal)) < 0.01:
+        print("Silence detected (No sound)")
+        return None
+    return extract_cry_features(live_signal, sr=sr)
+
+live_feature_vector = get_live_features()
+if live_feature_vector is not None:
+    X_live=live_feature_vector.reshape(1,-1) #this line was added by Dhuha
+    print("Live Feature Vector Ready! Shape:", live_feature_vector.shape)
+
+#Live Recording Classifying>>> @rana GUI
+def classify_live_record(x_live):
+    #load pickeled model
+    rf_from_pickle=pickle.loads(saved_model)
+    Prediction = rf_from_pickle.predict(x_live)
+    return str(label_map[Prediction.item()])    
+#*****************************************************************************************************************#
