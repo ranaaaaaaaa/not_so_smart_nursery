@@ -118,18 +118,20 @@ def create_waveform(window):
 
     return close_waveform
 
-
-def update_gui(window, temp_label, gas_label, awake_label, fan_label, light_label, gas_value):
+############ serial ############
+def update_gui(window, temp_label, gas_label, awake_label, fan_label, light_label):
+    global gas_value
     if ser.in_waiting > 0:  # only read if there's actually new data waiting
         raw_line = ser.readline().decode('utf-8', errors='ignore').strip()
+        # serial device sends bytes -> ser.readline() -> decode bytes into text -> remove newline characters
         if raw_line:
             data = parse_line(raw_line)
 
             if "Temp" in data:
-                temp_label.config(text=f"Temp: {data['Temp']} C")
+                temp_label.config(text=f"Temp: {data['Temp']} °C")
             if "Gas" in data:
                 gas_label.config(text=f"Gas: {data['Gas']}")
-                gas_value = data['Gas']
+                gas_value = float(data['Gas'])
             if "Awake" in data:
                 awake_text = "Yes" if data['Awake'] == "1" else "No"
                 awake_label.config(text=f"Awake: {awake_text}")
@@ -140,7 +142,7 @@ def update_gui(window, temp_label, gas_label, awake_label, fan_label, light_labe
                 light_text = "ON" if data['Light'] == "1" else "OFF"
                 light_label.config(text=f"Light: {light_text}")
 
-    window.after(23, update_gui, window, temp_label, gas_label, awake_label, fan_label, light_label, gas_value)
+    window.after(23, update_gui, window, temp_label, gas_label, awake_label, fan_label, light_label)
 
 def main():
     window = Tk()
@@ -237,7 +239,7 @@ def main():
                         )
     light_label.pack(side=TOP, pady=2)
 
-    update_gui(window, temp_label, gas_label, awake_label, fan_label, light_label, gas_value)
+    update_gui(window, temp_label, gas_label, awake_label, fan_label, light_label)
     ############ SECTION2 ############
     SECTION2_label = Label(window,
                            text="Baby STATE",
@@ -254,9 +256,10 @@ def main():
     # baby_state= random.choice(LIST)
     baby_state = 'UNCOMFORTABLE'
     # needs fixing
-    # if baby_state == 'UNCOMFORTABLE' and gas_value <= 500:
+    # if baby_state == 'HUNGRY' and gas_value <= 500:
     #    play()
     # connect with serial
+    # UNCOMFORTABLE -> suggest checking diaper, clothing, position.
 
     babystate_label = Label(window,
                             text=f"YOUR BABY IS {baby_state}.",
@@ -268,6 +271,30 @@ def main():
         side=TOP,
         pady= 2
     )
+    # UPDATE THIS TWO REGULARLY
+    # UPDATE_GUI_STATE
+    # IF BABY GETS FLAGGED AS AWAKE ONCE, DOES IT EVER GET FLAGGED AS ASLEEP AGAIN??
+    ############
+    # Laptop to Microcontroller
+    # Cry detected / Cry ended
+    # Laptop to Microcontroller
+    # Servo start / Servo stop
+    # Laptop to Microcontroller
+    # Buzzer on (tired cry alert)
+    SUGGESTIONS_label = Label(window,
+                            text=f"SUGGESTION: --",
+                            font=("ALGERIAN", 15, 'bold'),
+                            fg='#78d4ff',
+                            bg='white',
+                            )
+    SUGGESTIONS_label.pack(
+        side=TOP,
+        pady=2
+    )
+    # MIGHT NEED A SEPARATE GUI
+    # Hungry cry: display message and play calming video clip.
+    # Tired cry: sound buzzer immediately and display warning(this pattern is urgent).
+    # Discomfort cry: display message and suggest checking diaper, clothing, position.
     ############ MAINLOOP ############
     window.mainloop()
 
