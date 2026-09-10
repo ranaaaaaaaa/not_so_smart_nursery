@@ -1,6 +1,6 @@
 # not_so_smart_nursery
 
-'download:'
+> download:
 3ayoota.png 
 5atar.png
 mashkal.mp3
