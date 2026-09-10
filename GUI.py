@@ -1,112 +1,125 @@
 from tkinter import *
 import numpy as np
-import random
+# import random
 from time import *
 
 import pyaudio
 
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from video_player import play
 from serialpython import *
+from trigger_alert import *
+# from video_player import play
+# from ml_classification import predict_cry
+
+gas_value = 0
 
 MAX_AMPLITUDE = 4000
-FIG_SIZE = (6, 2)
 
 CHUNK_SIZE = 1024
 SAMPLE_RATE = 44100
 BAR_COUNT = 80
 
 def create_waveform(window):
+    ############ graph ############
     wave_frame = Frame(
         window,
         width=700,
         height=300,
         bg="white"
     )
-
     wave_frame.pack(
         side=TOP,
         padx=3,
         pady=3
     )
 
-    levels = np.zeros(BAR_COUNT)
+    levels= [0] * BAR_COUNT
 
-    figure = Figure(figsize=FIG_SIZE)
-    axis = figure.add_subplot(111)
+    figure = Figure(
+        figsize= (6,2)
+    ) # It does not display anything by itself yet. It is just the container for the graph.
+    axis = figure.add_subplot(1, 1, 1) # (rows, columns, position) # axes object
 
-    x_values = np.arange(BAR_COUNT)
-
+    x_values = np.arange(BAR_COUNT) # This creates the horizontal positions for the bars.
+    # matplotlib.axes.Axes.bar
+    # matplotlib.axes.Axes.set_ylim
+    # matplotlib.axes.Axes.set_xlim
     bars = axis.bar(
         x_values,
         levels,
         width=0.7
-    )
+    ) # zip(bars, levels) pairs each bar with its corresponding height
 
-    axis.set_ylim(0, MAX_AMPLITUDE)
-    axis.set_xlim(-1, BAR_COUNT)
-    axis.axis("off")
+    axis.set_ylim(0, MAX_AMPLITUDE) # set vertical range of graph
+    axis.set_xlim(-1, BAR_COUNT) # -1 to 80 prevents the edge bars from touching the graph boundaries
+    axis.axis("off") #  hides the graph decorations
 
-    figure.tight_layout()
+    figure.tight_layout() # graph fits better in its available area.
 
+    # FigureCanvasTkAgg
+    # links figure to GUI
     canvas = FigureCanvasTkAgg(
         figure,
-        master=wave_frame
+        master= wave_frame
     )
 
     canvas.get_tk_widget().pack()
+    # Tkinter window -> wave_frame -> Matplotlib canvas -> figure -> axis -> bars
 
+    ############ audio_input ############
     audio = pyaudio.PyAudio()
 
     stream = audio.open(
-        format=pyaudio.paInt16,
-        channels=1,
-        rate=SAMPLE_RATE,
-        input=True,
-        frames_per_buffer=CHUNK_SIZE
+        format= pyaudio.paInt16,
+        channels= 1,
+        rate= SAMPLE_RATE,
+        input= True,
+        frames_per_buffer= CHUNK_SIZE # 23 milliseconds of audio
     )
 
-    def check_audio():
+    def read_stream():
         nonlocal levels
 
         data = stream.read(
             CHUNK_SIZE,
-            exception_on_overflow=False
+            exception_on_overflow= False
         )
+
+        # predict_cry(data)
 
         audio_array = np.frombuffer(
             data,
-            dtype=np.int16
+            dtype= np.int16 # tells NumPy how to interpret the raw bytes that PyAudio returned.
         )
 
         amplitude = float(
             np.mean(np.abs(audio_array))
         )
 
-        levels = np.roll(levels, -1)
-        levels[-1] = amplitude
+        levels.pop(0)
+        levels.append(amplitude)
 
         for bar, height in zip(bars, levels):
             bar.set_height(height)
 
-        canvas.draw_idle()
+        canvas.draw_idle() # update without redrawing the whole canvas
 
         # stream.read() already waits for about 23 ms of audio
-        window.after(1, check_audio)
+        window.after(1, read_stream)
 
     def close_waveform():
-        stream.stop_stream()
+        stream.stop_stream() # Stops recording from the microphone. (cleanup)
         stream.close()
         audio.terminate()
 
-    check_audio()
+    read_stream()
 
     return close_waveform
 
 
-def update_gui(window, temp_label, gas_label, awake_label, fan_label, light_label):
+def update_gui(window, temp_label, gas_label, awake_label, fan_label, light_label, gas_value):
     if ser.in_waiting > 0:  # only read if there's actually new data waiting
         raw_line = ser.readline().decode('utf-8', errors='ignore').strip()
         if raw_line:
@@ -116,6 +129,7 @@ def update_gui(window, temp_label, gas_label, awake_label, fan_label, light_labe
                 temp_label.config(text=f"Temp: {data['Temp']} C")
             if "Gas" in data:
                 gas_label.config(text=f"Gas: {data['Gas']}")
+                gas_value = data['Gas']
             if "Awake" in data:
                 awake_text = "Yes" if data['Awake'] == "1" else "No"
                 awake_label.config(text=f"Awake: {awake_text}")
@@ -126,7 +140,7 @@ def update_gui(window, temp_label, gas_label, awake_label, fan_label, light_labe
                 light_text = "ON" if data['Light'] == "1" else "OFF"
                 light_label.config(text=f"Light: {light_text}")
 
-    window.after(23, update_gui, window, temp_label, gas_label, awake_label, fan_label, light_label)
+    window.after(23, update_gui, window, temp_label, gas_label, awake_label, fan_label, light_label, gas_value)
 
 def main():
     window = Tk()
@@ -160,7 +174,7 @@ def main():
         side=TOP,
         pady= 2
     )
-    close_waveform = create_waveform(window)
+    close_waveform = create_waveform(window) # it's a local fn inside the "create_waveform" so I need to keep a ref to it
 
     def close_application():
         close_waveform()
@@ -223,7 +237,7 @@ def main():
                         )
     light_label.pack(side=TOP, pady=2)
 
-    update_gui(window, temp_label, gas_label, awake_label, fan_label, light_label)
+    update_gui(window, temp_label, gas_label, awake_label, fan_label, light_label, gas_value)
     ############ SECTION2 ############
     SECTION2_label = Label(window,
                            text="Baby STATE",
@@ -236,11 +250,13 @@ def main():
         pady= 2
     )
     ############ baby_state(randomized for now) ############
-    LIST= ('HUNGRY','UNCOMFORTABLE','TIRED','FINE')
-    baby_state= random.choice(LIST)
+    # LIST= ('HUNGRY','UNCOMFORTABLE','TIRED','FINE')
+    # baby_state= random.choice(LIST)
+    baby_state = 'UNCOMFORTABLE'
     # needs fixing
-    # if baby_state == 'UNCOMFORTABLE' and data['Gas'] <= 500:
-    #     play()
+    # if baby_state == 'UNCOMFORTABLE' and gas_value <= 500:
+    #    play()
+    # connect with serial
 
     babystate_label = Label(window,
                             text=f"YOUR BABY IS {baby_state}.",
