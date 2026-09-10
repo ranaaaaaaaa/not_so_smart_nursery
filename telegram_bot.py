@@ -10,13 +10,8 @@ CHAT_ID = '5949246928'
 
 import requests
 
-# Uncomment to get updates
-# url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
-# print(requests.get(url).json())
-
 def send_alert():
     message = 'SERIOUS ALERT! CHECK ON YOUR BABY RIGHT NOW!'
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}&text={message}"
 
-    r = requests.get(url)
-    print(r.json())
+    print(requests.get(url).json())
