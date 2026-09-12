@@ -1,4 +1,3 @@
-#####################PRIORITIES NEEDS HANDLING ASAP#####################
 from tkinter import *
 import numpy as np
 # import random
@@ -17,7 +16,8 @@ from video_player import play
 #Model's Training Libraries
 import pandas as pd
 import pickle
-
+#__rolling
+from collections import deque
 #Audio Processing Libraries (Sarah)
 import os
 import librosa
@@ -31,26 +31,26 @@ with open("already_trained_model.pkl", "rb") as file:
 label_map = {0:"hungry" , 1:"discomfort", 2:"tired"}
 #Essential Functions in the secondary file
 def extract_cry_features(signal, sr=16000):
-    cleaned_signal = nr.reduce_noise(y=signal, sr=SAMPLE_RATE)
-    intervals=librosa.effects.split(cleaned_signal,top_db=20)
-    if len(intervals)>0:
-        VAD_signal=np.concatenate([cleaned_signal[start:end]for start,end in intervals])
+    cleaned_signal = nr.reduce_noise(y=signal, sr=sr)
+    intervals = librosa.effects.split(cleaned_signal, top_db=20)
+    if len(intervals) > 0:
+        VAD_signal = np.concatenate([cleaned_signal[start:end] for start, end in intervals])
     else:
-        VAD_signal=cleaned_signal
+        VAD_signal = cleaned_signal
     if len(VAD_signal) == 0:
-            return None
-    MFCCs=librosa.feature.mfcc(y=VAD_signal,sr=sr,n_mfcc=13)
-    MFCC_mean=np.mean(MFCCs,axis=1)
-    MFCC_std=np.std(MFCCs,axis=1)
-    f0=librosa.yin(VAD_signal,fmin=librosa.note_to_hz('C3'),fmax=librosa.note_to_hz('C7'),frame_length=2048,sr=sr)
-    f0_clean=f0[~np.isnan(f0)]if f0 is not None else[]
-    f0_mean=np.mean(f0_clean)if len(f0_clean)>0 else 0.0
-    f0_std=np.std(f0_clean) if len (f0_clean)>0 else 0.0
+        return None
+    MFCCs = librosa.feature.mfcc(y=VAD_signal, sr=sr, n_mfcc=13)
+    MFCC_mean = np.mean(MFCCs, axis=1)
+    MFCC_std = np.std(MFCCs, axis=1)
+    f0 = librosa.yin(VAD_signal, fmin=librosa.note_to_hz('C3'), fmax=librosa.note_to_hz('C7'), frame_length=2048)
+    f0_clean = f0[~np.isnan(f0)] if f0 is not None else []
+    f0_mean = np.mean(f0_clean) if len(f0_clean) > 0 else 0.0
+    f0_std = np.std(f0_clean) if len(f0_clean) > 0 else 0.0
     rms = librosa.feature.rms(y=VAD_signal)
     intensity_mean = np.mean(rms)
     intensity_std = np.std(rms)
     duration = librosa.get_duration(y=VAD_signal, sr=sr)
-    feature_vector=np.hstack([
+    feature_vector = np.hstack([
         MFCC_mean,
         MFCC_std,
         f0_mean,
@@ -60,14 +60,20 @@ def extract_cry_features(signal, sr=16000):
         duration])
     return feature_vector
 # Getting Live Records <<<@ Rana GUI
-def get_live_features(audio, sr=16000):
-    global baby_state
-    live_signal = audio.astype(np.float32) / 32768.0
-    if np.max(np.abs(live_signal)) < 0.01:
+# Runs on every 64ms chunk → servo responds instantly
+def update_servo(audio_array):
+    live_signal = audio_array.astype(np.float32) / 32768.0
+    if np.max(np.abs(live_signal)) < 0.15:
         # print("Silence detected (No sound)")
-        cry('0')
+        cry('C0')
+    else:
+        cry('C1')
+
+# Runs on the 6-second rolling window → ML classification
+def get_live_features(window_samples, sr=16000):
+    live_signal = window_samples.astype(np.float32) / 32768.0
+    if np.max(np.abs(live_signal)) < 0.15:
         return None
-    cry('1')
     return extract_cry_features(live_signal, sr=sr)
 
 #Live Recording Classifying>>> @rana GUI
@@ -77,7 +83,7 @@ def classify_live_record(x_live):
 ####################################
 
 gas_value = 0
-baby_state= ""
+baby_state= "fine"
 video_window= None
 alert_window= None
 
@@ -86,6 +92,8 @@ MAX_AMPLITUDE = 4000
 CHUNK_SIZE = 1024
 SAMPLE_RATE = 16000
 BAR_COUNT = 80
+#__rolling
+audio_buffer = deque(maxlen=96000)   # 6 seconds at 16 kHz
 
 def create_waveform(window):
     ############ graph ############
@@ -161,12 +169,26 @@ def create_waveform(window):
 
         ####################################
         # bytes has no attribute 'flatten'
-        live_feature_vector = get_live_features(audio_array)
-        if live_feature_vector is not None:
-            X_live = live_feature_vector.reshape(1, -1)  # this line was added by Dhuha
-            # print("Live Feature Vector Ready! Shape:", X_live.shape)
-            # calling pretrained classifying model
-            baby_state= classify_live_record(X_live)
+        # VAD on 64ms chunk → servo responds instantly
+        update_servo(audio_array)
+        # split so that the servo update won't be delayed 6 seconds
+        # Feed samples into 6-second rolling buffer
+        audio_buffer.extend(audio_array.tolist())
+
+        # ML classification once we have a full 6-second window
+        if len(audio_buffer) == 96000: # 16000*6
+            window_samples = np.array(audio_buffer, dtype=np.int16)
+            live_feature_vector = get_live_features(window_samples)
+            if live_feature_vector is not None:
+                X_live = live_feature_vector.reshape(1, -1)  # this line was added by Dhuha
+                # print("Live Feature Vector Ready! Shape:", X_live.shape)
+                # calling pretrained classifying model
+                baby_state = classify_live_record(X_live)
+                # slide the window forward by 1 second (16000 samples)
+            else:
+                baby_state = "fine"
+            for i in range(16000):
+                 audio_buffer.popleft()
         ####################################
 
         amplitude = float(
@@ -203,13 +225,14 @@ def update_suggestion(window, SUGGESTIONS_label):
     if baby_state == "fine":
         SUGGESTIONS_label.config(text=f"SUGGESTION: NO suggestions.", fg="green")
 
-    window.after(23, update_suggestion, window, SUGGESTIONS_label)
+    window.after(500, update_suggestion, window, SUGGESTIONS_label)
 ############ baby_state ############
 def update_state(window, babystate_label):
     global baby_state
     global video_window
+    global gas_value
     babystate_label.config(text=f"YOUR BABY IS {baby_state}")
-    if baby_state == "hungry":
+    if baby_state == "hungry" and gas_value <= 500:
         if video_window is None:
             video_window= play(window)
     else:
@@ -224,12 +247,13 @@ def update_state(window, babystate_label):
             video_window.destroy()
             video_window = None
 
-    window.after(23, update_state, window, babystate_label)
+    window.after(500, update_state, window, babystate_label)
 
 ############ serial ############
 def update_gui(window, temp_label, gas_label, awake_label, fan_label, light_label):
     global gas_value
     global alert_window
+    global video_window
     if ser.in_waiting > 0:  # only read if there's actually new data waiting
         raw_line = ser.readline().decode('utf-8', errors='ignore').strip()
         # serial device sends bytes -> ser.readline() -> decode bytes into text -> remove newline characters
@@ -250,13 +274,16 @@ def update_gui(window, temp_label, gas_label, awake_label, fan_label, light_labe
                 light_text = "ON" if data['Light'] == "1" else "OFF"
                 light_label.config(text=f"Light: {light_text}")
 
-        if gas_value > 500 and alert_window is None:
-            alert_window= trigger_alert(window)
-        elif gas_value <= 500 and alert_window is not None:
-            alert_window.destroy()
-            alert_window = None
+    if gas_value > 500 and alert_window is None:
+        alert_window = trigger_alert(window)
+        if video_window is not None:
+            video_window.destroy()
+            video_window = None
+    elif gas_value <= 500 and alert_window is not None:
+        alert_window.destroy()
+        alert_window = None
 
-    window.after(23, update_gui, window, temp_label, gas_label, awake_label, fan_label, light_label)
+    window.after(500, update_gui, window, temp_label, gas_label, awake_label, fan_label, light_label)
 
 
 def main():
@@ -374,7 +401,7 @@ def main():
     # connect with serial
 
     babystate_label = Label(window,
-                            text=f"YOUR BABY IS {baby_state}.",
+                            text=f"YOUR BABY IS --",
                             font=("ALGERIAN", 15, 'bold'),
                             fg='#78d4ff',
                             bg='white',
@@ -401,11 +428,13 @@ def main():
         side=TOP,
         pady=2
     )
-    def dismiss_cry(babystate_label):
+    update_suggestion(window, SUGGESTIONS_label)
+    def dismiss_cry():
         babystate_label.config(text="YOUR BABY IS FINE.")
     dismiss_button = Button(window,
                             text="DISMISS",
                             command= dismiss_cry,
+                            state=ACTIVE,
                             )
     dismiss_button.pack(
         side=TOP,
