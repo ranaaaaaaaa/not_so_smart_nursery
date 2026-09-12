@@ -1,0 +1,188 @@
+#include <Servo.h>
+Servo myservo; //creates a servo object named myservo
+
+unsigned long startTime  = millis();
+unsigned long lastSample = startTime;
+unsigned long time  = millis();
+int baby_state;
+int cry= 0;
+int awake= 0;
+int tired= 0;
+int counter= 0;
+int flag= 0;
+
+int pir_pin=6;
+
+int light_pin=A0;
+int LED=8;
+int light_threshold=500;
+
+int gas_pin=A2;
+int smoke_threshold=500;
+int buzzer=9;
+
+int temp_pin=A1;
+int LED_R=2;
+int LED_B=4;
+int LED_G=7;
+
+int IN1=10;
+int IN2=11;
+int EN=5;
+int speed= 0;
+
+void setup() {
+  Serial.begin(9600); 
+
+  pinMode(pir_pin,INPUT);
+  // being capable of PWM doesn't mean a pin is always used for PWM 
+  // it just means that pin has the option if you call analogWrite()
+  // on it.
+
+  pinMode(light_pin,INPUT);
+  pinMode(LED,OUTPUT);
+
+  pinMode(gas_pin,INPUT);
+
+  pinMode(buzzer,OUTPUT);
+
+  pinMode(temp_pin,INPUT);
+  pinMode(LED_R,OUTPUT);
+  pinMode(LED_B,OUTPUT);
+  pinMode(LED_G,OUTPUT);
+
+  //motor
+  pinMode(IN1,OUTPUT);
+  pinMode(IN2,OUTPUT);
+  pinMode(EN,OUTPUT);
+
+  myservo.attach(3);
+
+}
+
+void loop() {
+
+  if (Serial.available() > 0) {
+  String command = Serial.readStringUntil('\r');
+  command.trim();
+  
+  if (command == "B1") {
+    tired= 1;
+    digitalWrite(buzzer, HIGH);
+  }
+  else if (command == "B0") {
+    tired= 0;
+    digitalWrite(buzzer, LOW);
+  }
+  else if (command == "C1") {
+    cry = 1;
+  }
+  else if (command == "C0") {
+    cry = 0;
+  }
+  }
+
+  //gas sensor & buzzer
+  float gas=analogRead(gas_pin);
+  if(gas>smoke_threshold){
+    digitalWrite(buzzer,HIGH);
+    //delay(1000);
+  }
+  else if (tired==1){ //
+    digitalWrite(buzzer,HIGH); //
+  } //
+  else{
+    digitalWrite(buzzer,LOW);
+    //delay(1000);
+  }
+  
+  //temperature sensor and cooling fan (motor)
+  float volt= analogRead(temp_pin)*(5/1024.0);
+  float temp= (volt-0.5)*100;
+  digitalWrite(IN1,HIGH);
+  digitalWrite(IN2,LOW);
+  if (temp<25) {
+    digitalWrite(LED_B,HIGH);
+    digitalWrite(LED_R,LOW);
+    digitalWrite(LED_G,LOW);
+    analogWrite(EN,0);
+  }
+  else if (temp<=30) {
+    digitalWrite(LED_G,HIGH);
+    digitalWrite(LED_B,LOW);
+    digitalWrite(LED_R,LOW);
+    analogWrite(EN,127);
+  }
+  else {
+    digitalWrite(LED_R,HIGH);
+    digitalWrite(LED_B,LOW);
+    digitalWrite(LED_G,LOW);
+    analogWrite(EN,255);
+  }
+  
+  //PIR sensor
+  int pir;
+  int i;
+  if ((millis() - startTime < 8000)&&(millis()-lastSample> 1000)) {
+    lastSample=millis();
+  	pir= digitalRead(pir_pin);
+    if (pir == HIGH) {
+    	counter++;
+    }
+    if (counter>=4){
+        counter=0;
+        startTime=millis();
+        awake=1;
+    }
+    else{
+        awake=0;
+    }
+  }
+  else if (millis() - startTime > 8000){
+    startTime=millis();
+    counter=0;
+  }
+  
+  //room lighting (light sensor & LED)
+  float light=analogRead(light_pin);
+  if (light>= light_threshold && (awake==1 || cry==1)){
+    digitalWrite(LED,HIGH);
+  }
+  else{
+    digitalWrite(LED,LOW);
+  }
+  
+  //servo motor
+  if (cry==1){
+    if(millis()-time<1000){
+      myservo.write(90);
+    }
+    else if(millis()-time<2000){
+      myservo.write(0);
+    }
+    else if(millis()-time<3000){
+      myservo.write(180);
+    }
+    else if(millis()-time<4000){
+      myservo.write(0);
+    }
+    else{
+      time  = millis();
+    }
+  }
+  else{
+    time=millis();
+  }
+
+  Serial.print("Temp:");
+  Serial.print(temp);
+  Serial.print(",Gas:");
+  Serial.print(gas);
+  Serial.print(",Awake:");
+  Serial.print(awake);
+  Serial.print(",Fan:");
+  Serial.print(digitalRead(EN)==0?0:1); 
+  Serial.print(",Light:");
+  Serial.println(digitalRead(LED));
+
+}
