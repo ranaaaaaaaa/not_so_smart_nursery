@@ -1,7 +1,7 @@
 # pip install pyserial
 import serial
 
-ser = serial.Serial('COM3', 9600)
+ser = serial.Serial('COM4', 9600)
 
 # Parse one line of data like: "Temp:26.30,Gas:180.00,Awake:1,Fan:1,Light:0"
 # string manipulation
