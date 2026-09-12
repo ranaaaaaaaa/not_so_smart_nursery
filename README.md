@@ -3,8 +3,8 @@
 > drive:
 https://drive.google.com/drive/folders/12p2iuLTkDaTgLdKXVU6b1ozY8I97_jF5
 
-> tinkercad:
-https://www.tinkercad.com/things/jVpQvmCroje-copy-of-smart-nursery-guardian
+> tinkercad:[
+https://www.tinkercad.com/things/jVpQvmCroje-copy-of-smart-nursery-guardian](https://www.tinkercad.com/things/jVpQvmCroje-copy-of-smart-nursery-guardian?sharecode=hjDszHumMTGjrFuFEeFtL6lL159uRarfmpMBbweMeB4)
 
 # Smart Nursery Guardian — System Logic & Flow Overview
 
