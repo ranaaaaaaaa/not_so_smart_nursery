@@ -5,7 +5,7 @@ def play(window):
     video_player = Toplevel(window)
     video_player.title("Video Player")
     video_player.attributes("-topmost", True)
-    video_player.state("zoomed")
+    # video_player.state("zoomed")
 
     canvas = Canvas(video_player)
     canvas.pack(fill="both", expand=True)
