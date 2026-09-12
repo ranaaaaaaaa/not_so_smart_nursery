@@ -17,53 +17,9 @@ The system is split across two devices that talk over a serial connection:
 | Part | Runs On | Responsibility |
 |---|---|---|
 | **Python App (Tkinter GUI)** | Laptop | Microphone capture, noise reduction, VAD, ML cry classification, GUI display, video playback, Telegram alerts |
-| **Firmware** | Microcontroller (STM32 BlackPill) | Reads PIR, light (LDR), temperature (NTC), and gas sensors; drives servo, buzzer, RGB LED, lamp LED, and cooling fan; relays sensor events to the laptop |
+| **Firmware** | Microcontroller | Reads PIR, light (LDR), temperature (NTC), and gas sensors; drives servo, buzzer, RGB LED, lamp LED, and cooling fan; relays sensor events to the laptop |
 
 **Key asymmetry:** audio never crosses the serial link — the laptop reads its own microphone directly, so cry detection and servo response have effectively zero latency. Every other sensor (motion, light, temperature, gas) is read by the microcontroller and relayed to the laptop over serial, so those messages are kept minimal to avoid flooding the link.
-
-```mermaid
-flowchart LR
-    subgraph MCU["Microcontroller (STM32)"]
-        PIR[PIR Sensor]
-        LDR[Light Sensor]
-        TEMP[Thermistor]
-        GAS[Gas Sensor]
-        SERVO[Servo Motor]
-        FAN[Cooling Fan]
-        LED[Room LED]
-        BUZZ[Buzzer]
-        RGB[Status RGB]
-    end
-
-    subgraph LAPTOP["Laptop (Python / Tkinter)"]
-        MIC[Microphone]
-        NR[Noise Reduction]
-        VAD[Voice Activity Detection]
-        FEAT[Feature Extraction<br/>MFCC, F0, RMS, duration]
-        ML[Trained ML Model<br/>hungry / tired / discomfort]
-        GUI[Tkinter GUI]
-        VIDEO[Calming Video Player]
-        TG[Telegram Bot]
-    end
-
-    MIC --> NR --> VAD -->|cry confirmed| FEAT --> ML --> GUI
-    VAD -->|cry-detected / cry-ended| SERVO
-    ML -->|hungry| VIDEO
-    ML -->|tired| BUZZ
-    GAS -->|gas > threshold| TG
-    GAS --> GUI
-    PIR -->|4+ motions / 8s| LED
-    LDR --> LED
-    TEMP --> FAN
-    TEMP --> RGB
-    PIR -.serial.-> LAPTOP
-    LDR -.serial.-> LAPTOP
-    TEMP -.serial.-> LAPTOP
-    GAS -.serial.-> LAPTOP
-    LAPTOP -.serial.-> SERVO
-    LAPTOP -.serial.-> BUZZ
-    LAPTOP -.serial.-> LED
-```
 
 ## 2. Startup Sequence
 
@@ -73,7 +29,7 @@ flowchart LR
    - `update_gui` — reads serial data every 500 ms
    - `update_state` — evaluates `baby_state` every 500 ms and drives servo/video
    - `update_suggestion` — refreshes the on-screen suggestion text every 500 ms
-   - The audio `read_stream` loop runs continuously (effectively every ~23 ms, gated by the mic buffer)
+   - The audio `read_stream` loop runs continuously (effectively every ~64 ms, gated by the mic buffer)
 
 ## 3. Live Audio Path (Cry Detection & Classification)
 
@@ -189,13 +145,13 @@ flowchart TD
 3. **Split**: 80/20 train/test, done **before** augmentation.
 4. **Cleaning**: spectral noise reduction, then voice activity detection to discard silence.
 5. **Features**: MFCC mean/std, F0 mean/std, RMS intensity mean/std, duration — one fixed-length row per clip.
-6. **Model**: Random Forest / SVM (classical ML, trains in seconds, no GPU required).
+6. **Model**: Random Forest
 7. **Validation**: confusion matrix checked per class (not just overall accuracy) to catch a model that just predicts "hungry" every time.
 8. **Deployment**: trained model is pickled once (`already_trained_model.pkl`) and loaded a single time when the Python app starts; it is never retrained live.
 
 ## 8. Hardware Components
 
-- STM32 BlackPill (or equivalent microcontroller)
+- Altium Nano
 - NTC thermistor (temperature)
 - PIR motion sensor
 - Photoresistor / LDR (light)
@@ -204,10 +160,5 @@ flowchart TD
 - RGB LED (status) + standalone LED (room lamp)
 - L293D motor driver + DC motor/fan
 - Micro servo (crib rocking)
-- 4-layer PCB (Altium): schdoc, pcbdoc, schlib, pcblib, JLCPCB design rules
+- 4-layer PCB (Altium)
 
-## 9. Design Rationale
-
-- **Why split laptop/microcontroller?** AI, audio DSP, and GUI rendering need Python's libraries and compute; the microcontroller can't support that. Conversely, real-time actuator timing (servo, buzzer) needs the microcontroller's low-level precision. This "edge device for sensing/actuation + smart device for decisions" split mirrors standard production IoT architecture.
-- **Why rock before classifying?** Soothing is the same first instinct a human caregiver has — the servo starts on raw VAD (~64 ms reaction), while classification (needs a 6-second window) catches up in the background.
-- **Why gate the video on gas level?** A safety hazard always overrides a comfort response — the system will never distract a caregiver with a calming video while gas/smoke is detected.
