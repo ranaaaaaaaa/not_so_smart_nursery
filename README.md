@@ -6,64 +6,19 @@ https://drive.google.com/drive/folders/12p2iuLTkDaTgLdKXVU6b1ozY8I97_jF5
 > tinkercad:[
 https://www.tinkercad.com/things/jVpQvmCroje-copy-of-smart-nursery-guardian](https://www.tinkercad.com/things/jVpQvmCroje-copy-of-smart-nursery-guardian?sharecode=hjDszHumMTGjrFuFEeFtL6lL159uRarfmpMBbweMeB4)
 
-# Smart Nursery Guardian — System Logic & Flow Overview
+# System Logic & Flow Overview
 
 An AI-assisted embedded monitoring system that listens for infant cries, classifies their cause with a trained ML model, and coordinates a microcontroller to soothe, alert, and regulate the nursery environment in real time.
 
-## 1. Architecture at a Glance
-
+## 1. Architecture
 The system is split across two devices that talk over a serial connection:
 
 | Part | Runs On | Responsibility |
 |---|---|---|
 | **Python App (Tkinter GUI)** | Laptop | Microphone capture, noise reduction, VAD, ML cry classification, GUI display, video playback, Telegram alerts |
-| **Firmware** | Microcontroller (STM32 BlackPill) | Reads PIR, light (LDR), temperature (NTC), and gas sensors; drives servo, buzzer, RGB LED, lamp LED, and cooling fan; relays sensor events to the laptop |
+| **Firmware** | Microcontroller | Reads PIR, light (LDR), temperature (NTC), and gas sensors; drives servo, buzzer, RGB LED, lamp LED, and cooling fan; relays sensor events to the laptop |
 
-**Key asymmetry:** audio never crosses the serial link — the laptop reads its own microphone directly, so cry detection and servo response have effectively zero latency. Every other sensor (motion, light, temperature, gas) is read by the microcontroller and relayed to the laptop over serial, so those messages are kept minimal to avoid flooding the link.
-
-```mermaid
-flowchart LR
-    subgraph MCU["Microcontroller (STM32)"]
-        PIR[PIR Sensor]
-        LDR[Light Sensor]
-        TEMP[Thermistor]
-        GAS[Gas Sensor]
-        SERVO[Servo Motor]
-        FAN[Cooling Fan]
-        LED[Room LED]
-        BUZZ[Buzzer]
-        RGB[Status RGB]
-    end
-
-    subgraph LAPTOP["Laptop (Python / Tkinter)"]
-        MIC[Microphone]
-        NR[Noise Reduction]
-        VAD[Voice Activity Detection]
-        FEAT[Feature Extraction<br/>MFCC, F0, RMS, duration]
-        ML[Trained ML Model<br/>hungry / tired / discomfort]
-        GUI[Tkinter GUI]
-        VIDEO[Calming Video Player]
-        TG[Telegram Bot]
-    end
-
-    MIC --> NR --> VAD -->|cry confirmed| FEAT --> ML --> GUI
-    VAD -->|cry-detected / cry-ended| SERVO
-    ML -->|hungry| VIDEO
-    ML -->|tired| BUZZ
-    GAS -->|gas > threshold| TG
-    GAS --> GUI
-    PIR -->|4+ motions / 8s| LED
-    LDR --> LED
-    TEMP --> FAN
-    TEMP --> RGB
-    PIR -.serial.-> LAPTOP
-    LDR -.serial.-> LAPTOP
-    TEMP -.serial.-> LAPTOP
-    GAS -.serial.-> LAPTOP
-    LAPTOP -.serial.-> SERVO
-    LAPTOP -.serial.-> BUZZ
-    LAPTOP -.serial.-> LED
-```
+**Key asymmetry:** audio never crosses the serial link - the laptop reads its own microphone directly, so cry detection and servo response have effectively zero latency. Every other sensor (motion, light, temperature, gas) is read by the microcontroller and relayed to the laptop over serial, so those messages are kept minimal to avoid flooding the link.
 
 ## 1.1 Servo Rocking Cycle (Actual Firmware Behavior)
 
@@ -179,8 +134,6 @@ Color and fan speed are derived from the same reading, so they always agree. Tem
 - A **Telegram message** ("SERIOUS ALERT! CHECK ON YOUR BABY RIGHT NOW!") is sent via a direct HTTPS GET to the Telegram Bot API (`telegram_bot.py`).
 - Any active calming video is immediately closed — the safety alert takes precedence.
 - Alert window closes automatically once gas value drops back to ≤ 500.
-
-> ⚠️ **Security note:** `telegram_bot.py` currently hardcodes the bot token and chat ID directly in source. Before pushing this to a public (or even private) GitHub repo, move these into environment variables or a `.gitignore`'d config file, and rotate the existing token via @BotFather — a token committed to git history is effectively public.
 
 ```mermaid
 flowchart TD
